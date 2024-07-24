@@ -1,17 +1,19 @@
-package com.mygdx.game.Controllers;
+package com.disector.console;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
-import com.mygdx.game.AssetContainers.Images;
 
-public class GameConsole {
+import java.util.Arrays;
+
+public class Console {
     private final SpriteBatch batch;
     private final ShapeRenderer shape;
     private final Matrix4 renderTransform;
@@ -25,61 +27,41 @@ public class GameConsole {
     private final int xBorder = 42;
 
     private String currentIn;
-    private String messageBin;
-    private final Array<String> arguments;
     private final Array<String> textLines;
-    private final String argPrefix = " @";
-    private final String argSeparator= ",";
 
-    private Color backgroundColor;
     private InputAdapter inputAdapter;
+    private CommandExecutor executor;
 
-    public GameConsole() {
+    BitmapFont font = new BitmapFont( Gdx.files.local("assets/font/fira.fnt") );
+    private final Color backgroundColor = new Color(0.2f, 0.4f, 0.8f, 0.7f);
+
+    public Console(CommandExecutor executor) {
         active = false;
         visible = false;
         y=Gdx.graphics.getHeight();
-        lineHeight = Images.font.getLineHeight()+8;
+        lineHeight = font.getLineHeight()+8;
         lineScroll = 0;
-
-        backgroundColor = new Color(0.15f, 0.6f, 0.25f, 0.3f);
 
         batch = new SpriteBatch();
         shape = new ShapeRenderer();
         renderTransform = new Matrix4();
+        font.setColor(Color.WHITE);
 
-        textLines = new Array<String>(25);
+        textLines = new Array<>(25);
         currentIn = "";
-        messageBin = "";
-        arguments = new Array<String>(3);
-
         textLines.add("    -= welcome =-");
 
-        createInputProcessor();
-    }
+        this.executor = executor;
 
-    public Matrix4 getRenderTransform() {
-        return renderTransform;
+        createInputProcessor();
     }
 
     public void insertText(String str) {
         textLines.insert(0, str);
     }
 
-    public String peekMessage() {
-        return messageBin;
-    }
-
-    public String seeArgument(int index) {
-        return arguments.get(index);
-    }
-
     public InputAdapter getInputAdapter() {
         return inputAdapter;
-    }
-
-    public void clearMessage() {
-        messageBin =  "";
-        arguments.clear();
     }
 
     private void createInputProcessor() {
@@ -98,12 +80,11 @@ public class GameConsole {
                     currentIn += character;
 
                 if (character == '\b') { //Backspace
-                    currentIn = currentIn.substring(0, Math.max( 0, (currentIn+"MARKMARKMARK").indexOf("MARKMARKMARK")-1) );
+                    currentIn = currentIn.substring(0, Math.max( 0, (currentIn+"MARK!MARK%MARK?").indexOf("MARK!MARK%MARK?")-1) );
+                } else if (character == '\t') {
+                    currentIn = autoComplete(currentIn);
                 }
 
-                if (character == '\t') {
-                    messageBin = "edit";
-                }
                 return true;
             }
 
@@ -115,6 +96,7 @@ public class GameConsole {
                             currentIn = ""; //Bug fix to actually do this in update
                             break;
                         case Input.Keys.ENTER:
+                            lineScroll = 0;
                             processInput();
                             break;
                         case Input.Keys.PAGE_DOWN:
@@ -153,7 +135,7 @@ public class GameConsole {
     }
 
     public void updateAndDraw(float delta) {
-        //Fix bug where commands dont register currently after delete was pressed ?
+        //Fix bug where commands don't register currently after delete was pressed ?
         if (active && Gdx.input.isKeyJustPressed(Input.Keys.FORWARD_DEL) ) {
             currentIn = "";
         }
@@ -165,13 +147,14 @@ public class GameConsole {
 
         //Slide console up or down
         float yGoal = Gdx.graphics.getHeight() * (1.0f - screenPercentage);
+        final float SCROLL_SPEED = 1500;
         if (active) {
             visible = true;
             if (y != yGoal)
-                y =  Math.max(y-1500.0f*delta, yGoal);
+                y =  Math.max(y-SCROLL_SPEED*delta, yGoal);
         } else {
             if (y != Gdx.graphics.getHeight())
-                y = Math.min(y+1500.0f*delta, Gdx.graphics.getHeight());
+                y = Math.min(y+SCROLL_SPEED*delta, Gdx.graphics.getHeight());
             if ( Math.round(y) == Gdx.graphics.getHeight())
                 visible = false;
         }
@@ -186,47 +169,20 @@ public class GameConsole {
         renderTransform.setToOrtho2D(0.0f,0.0f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight() );
     }
 
-    public void setBackgroundColor(float r, float g, float b) {
-        backgroundColor.set(r,g,b, backgroundColor.a);
-    }
-
     private void processInput() {
+        insertText(">> " + currentIn);
 
-        if (!currentIn.isEmpty()) {
-            //Ensure previous arguments are cleared
-            clearMessage();
+        String response = executor.execute(currentIn);
 
-            //Get Message and Arguments
-            int argumentFillerIndex = 0;
+        currentIn = "";
 
-            if (currentIn.contains(argPrefix)) {
-                arguments.add(currentIn.substring(currentIn.indexOf(argPrefix) + 2) );
-                currentIn = currentIn.substring(0, currentIn.indexOf(argPrefix));
+        if (response == null)
+            return;
 
-                while (arguments.get(argumentFillerIndex).contains(argSeparator)) {
-                    arguments.add(arguments.get(argumentFillerIndex).substring(arguments.get(argumentFillerIndex).indexOf(argSeparator) + 1) );
-                    arguments.set( argumentFillerIndex, arguments.get(argumentFillerIndex).substring(0, arguments.get(argumentFillerIndex).indexOf(argSeparator)) );
-                    argumentFillerIndex++;
-                }
-            }
+        String[] responses = response.split("\n");
 
-            //Log Message and Arguments
-            insertText(">> " + currentIn);
-
-            if (!arguments.isEmpty()) {
-                StringBuilder argLine = new StringBuilder("    >");
-                for (String arg : arguments) {
-                    if (!arg.isEmpty())
-                        argLine.append(arg).append("  ");
-                }
-                insertText(argLine.toString());
-            }
-
-            //Drop Message and reset input
-            currentIn = currentIn.toLowerCase();
-            messageBin = currentIn.toLowerCase();
-            currentIn = "";
-        }
+        for (String line : responses)
+            insertText(line);
     }
 
     private void draw() {
@@ -250,19 +206,47 @@ public class GameConsole {
 
         batch.begin();
         batch.setProjectionMatrix(renderTransform);
-        Images.font.setColor(Color.WHITE);
 
         //Draw Fps
-        Images.font.draw(batch, "FPS: " + String.valueOf((int)(1.0f/Gdx.graphics.getDeltaTime()) ), Gdx.graphics.getWidth()-175.0f, y+lineHeight-10.0f);
+        font.draw(batch, "FPS: " + (int)(1.0f/Gdx.graphics.getDeltaTime()), Gdx.graphics.getWidth()-175.0f, y+lineHeight-10.0f);
 
         //Draw Console Input
-        Images.font.draw(batch, currentIn, xBorder, y - 5 + lineHeight);
+        font.draw(batch, currentIn, xBorder, y - 5 + lineHeight);
 
         //Draw Console Log
         for (int i = lineScroll; i < textLines.size; i++) {
-            Images.font.draw(batch, textLines.get(i), xBorder, y + (i+2-lineScroll)*lineHeight);
+            font.draw(batch, textLines.get(i), xBorder, y + (i+2-lineScroll)*lineHeight);
         }
         batch.end();
     }
 
+    private String autoComplete(String str) {
+        if (str == null || str.replaceAll("\n|\t|\b|\r", "").isEmpty() )
+            return "";
+        String[] names = executor.getCommandNames();
+        final String finalizedStr = str;
+        Object[] filteredNames = Arrays.stream(names).filter(
+                (String name) -> (!name.equalsIgnoreCase(finalizedStr) && name.toLowerCase().startsWith( finalizedStr.toLowerCase() ))
+        ).toArray();
+
+        int size = filteredNames.length;
+        if (size == 0)
+            return "";
+        else if (size == 1)
+            return (String) filteredNames[0];
+
+        String current = str;
+        while (size > 1) {
+            int strLength = current.length()+1;
+            if (strLength >= ((String)filteredNames[0]).length())
+                return (String) filteredNames[0];
+            current = ((String) filteredNames[0]).substring(0, current.length()+1);
+            final String currentFinal = current;
+            filteredNames = Arrays.stream(names).filter(
+                (String name) -> (!name.equalsIgnoreCase(currentFinal) && name.toLowerCase().startsWith( currentFinal.toLowerCase() ))
+            ).toArray();
+            size = filteredNames.length;
+        }
+        return current.substring(0, current.length()-1);
+    }
 }
